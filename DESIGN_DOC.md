@@ -1,0 +1,110 @@
+## 2023-06-25
+- thinking about a clean-room rebuild of Waterwheel
+- stuff to keep
+    - selectors: single/upstream/downstream/all, plus probably more (DBT has a lot here, good inspiration)
+    - state: builds should "remember" what they've done, be resumable after a failure
+        - lots of possibilities here, may end up with something different from Waterwheel
+    - no templating/macros
+    - explicit `create table` statements
+    - each build is a script, not limited to a single statement
+    - schema-based file organization
+        - may want to support database/schema/table for DBs like Snowflake, BigQuery
+
+- stuff to rethink
+    - Python is a bad platform because it makes it hard to distribute a tool. Lean towards Java, Golang, Rust, C++ (unless Nuitka or WASM or ??? can solve the distribution problem)
+    - sources should not be implicit (again DBT gets this right), they should be declared in some simple way
+    - build our own task executor, to avoid the dependency on Luigi
+    - consider splitting a script into statements using a magic comment rather than a SQL parser, less elegant but more reliable
+    - profiles/namespacing: I still think there's merit to a shared dev environment but DBT's approach is appealing, and safer
+    - out-of-line dependency declaration
+        - sqlglot may enable inferring dependencies
+        - but note the flexibility of out-of-line: you can easily depend on something you don't use (vs. DBT's hints) or choose _not_ to depend on something you do use
+        - there's a connection here to namespacing... DBT's `source()` and `ref()` do double-duty creating dependency edges and facilitating dynamic names
+
+- stuff to add
+    - sqlglot may unlock the way I wanted to do testing
+        - alternatively look at Great Expectations
+    - customizable permissions
+    - function/procedure management
+    - nice lineage visualization
+    - docs beyond README.md
+        - alternatively look at other documentation tools, there was one I came across that I don't recall the name of...
+
+- sketch of task lifecycle
+    - this may be overkill for Waterwheel but I'm confident it's desirable for a general DAG system, and using it here would be a good test
+    - general idea is that tasks have a state, and the tool logs (journals) all state transitions, which facilitates resumability
+    - states
+        - INITIAL: dummy state that all tasks start in
+        - WAITING: there are incomplete upstream dependencies
+        - READY: all upstream dependencies are complete, ready to execute subject to worker thread availability
+        - RUNNING: duh
+        - COMPLETE: duh
+        - FAILED: something went wrong
+        - UPSTREAM_FAILED: a dependency went to FAILED so this task will not be attempted
+        - (note that there's no AWAITING_RETRY or anything, I don't think retries are desirable, at least in v0)
+    - happy path is INITIAL->WAITING->READY->RUNNING->COMPLETE
+        - not 100% clear that going through READY is necessary, might be ok to go WAITING->RUNNING, need to ponder more
+    - but obviously RUNNING->FAILED is possible
+    - COMPLETE, FAILED, and UPSTREAM_FAILED are all terminal, no further progress is possible
+    - no backward movement of state would make sense, best as I can tell
+
+    - on resumption
+        - if state is supplied (likely as some kind of single file, either a line-oriented text file of some kind, or a SQLite DB), the tool should begin by replaying the logged state transitions
+        - though there is a single log stream, replay should be handled on a per-task basis
+        - during replay, tasks should not actually execute (duh)
+        - transitions into FAILED should not be replayed, because giving those tasks another try is the whole point
+            - one simple solution would be to transition into READY instead, but this assumes that the same target(s) is/are being built
+            - if we allow re-using state for different targets, FAILED tasks would need to have their dependencies checked, so maybe they go into INITIAL, or WAITING, or perhaps a special recovery state is needed
+        - similarly, transitions into UPSTREAM_FAILED should not be replayed
+            - likely these can be put into WAITING
+
+
+- sketch of iterate-the-graph strategy
+    - if a state file is provided, replay it
+    - make a list of all nodes based on a Topological Sort of the graph (excluding COMPLETED/FAILED/UPSTREAM_FAILED if state was replayed)
+    - while that list is non-empty:
+        - iterate the list
+            - if node state is INITIAL:
+                - for SourceNote, move to COMPLETED (or into RUNNING if we're doing existence checks)
+                - for TaskNode, check immediate ancestors for completeness
+                    - all COMPLETED -> READY
+                    - otherwise -> WAITING
+            - if node state is WAITING:
+                - re-check state of immediate ancestors, if all are COMPLETED set this one to READY
+            - if node state is READY:
+                - check for an available worker slot, if one is available start it and set to RUNNING
+            - if node state is RUNNING:
+                - poll for completion (works well if a Future is used internally), if so set to COMPLETED
+            - if node state is COMPLETED:
+                - remove from the list
+            - if node state is FAILED:
+                - remove from the list
+            - if node state is UPSTREAM_FAILED:
+                - remove from the list
+        - note: instead of destructive mutation of the list, can alternatively build up a new list to pass to the next iteration of the outer loop
+        - potentially throttle the outer loop so we don't burn too much CPU
+
+- sketch of events-on-a-queue strategy
+    - on startup with no state, iterate the graph in Topological Sort order, send an INITIALIZE event (or whatever)
+    - on startup with state, probably replay the log directly onto the queue?
+    - when processing INITIALIZE event:
+        - for SourceNode, can probably move directly to COMPLETED
+            - but may want perform an existence check, which probably implies going into RUNNING first
+        - for TaskNode
+            - check if all ancestors are completed
+                - true: set to READY and send a corresponding event
+                - false: set to WAITING, which should be logged/journaled but doesn't need an event since there's nothing to do (but maybe send one anyway?)
+    - when processing a WAITING event (if we even send one):
+        - do nothing
+    - when processing a READY event:
+        - is there is an available worker slot?
+            - start it / set to RUNNING and send a corresponding event (though I'm not sure anything can react to that?)
+            - do nothing(???) / maybe increment a "ready tasks" counter
+    - when processing a RUNNING event:
+        - do nothing
+    - when processing a COMPLETED event:
+        - check for any READY tasks, set the first one found to RUNNING
+    - when processing a FAILED event:
+        - mark all descendants as UPSTREAM_FAILED
+    - when processing an UPSTREAM_FAILED event:
+        - do nothing
