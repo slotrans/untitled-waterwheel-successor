@@ -108,3 +108,45 @@
         - mark all descendants as UPSTREAM_FAILED
     - when processing an UPSTREAM_FAILED event:
         - do nothing
+
+
+## 2023-07-01
+- think I had a better idea / set of ideas...
+- all node state, regardless of type, should follow the same rules. This lets us move state transition logic outside of the node classes
+- compute node state rather than materializing it
+    - if a node has a running thread, whether that's in a pool or represented by a FutureTask or whatever, then it's RUNNING
+    - if it has a result, it's either COMPLETED or FAILED (depending on the result)
+    - if any ancestor if FAILED then it's UPSTREAM_FAILED
+    - (note that it may make sense to materialize terminal statuses)
+    - if it has no ancestors, or all ancestors are COMPLETED, then it's READY
+    - otherwise it's WAITING
+- making this determination requires traversing the graph in dependency order (opposite of data flow order)
+    - recursively
+    - this will be fast for nodes to the "left" and slow for nodes to the "right"
+    - terminal states can be cached with no change in semantics, which will speed things up as work progresses
+    - one optimization would be to cache a node's status for the duration of each outer loop iteration
+        - tradeoff: speeds up state determination, but delays recognition of task completion/failure until the next iteration
+        - we can implement without this, then add it if it seems necessary
+- this simplifies "replay"
+    - journal really only needs to record terminal states
+    - the replay process is as simple as
+        - read the journal
+        - ignore FAILED and UPSTREAM_FAILED entirely
+        - produce a set of nodes that reached COMPLETED
+        - use that set to filter the list of nodes-to-process before the first outer loop iteration
+- state becomes easy to store
+    - can be SQLite, or any SQL DB, or a JSON file, or a K/V store of any kind, etc etc etc
+    - need to think about what's most ergonomic
+    - create an interface for this, try a bunch of stuff
+- re-sketch of high-level flow
+    - build graph
+    - produce list of nodes to process from a topological sort of the graph
+    - (if state was provided)
+    - outer loop: iterate while list is non-empty
+        - create an empty list to hold the nodes that will flow to the next iteration
+        - inner loop: iterate the list
+            - compute state
+            - if it's a terminal state, journal it
+            - if it's READY, and there's a slot available, start it (not sure if nodes should implement Runnable or Callable, or just have an interface method that starts their machinery)
+                - currently thinking it's up to each node type to know how to run itself, but not 100% sure
+            - still may want to add a delay here to reduce CPU usage
