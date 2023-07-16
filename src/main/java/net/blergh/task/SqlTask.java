@@ -69,8 +69,8 @@ public class SqlTask implements Task
 
         output += runBuild();
 
-        //TODO: set knownTaskStatus to COMPLETE or FAILED
-        //TODO: may need to carefully apply synchronized() since this method runs in a Thread
+        //TODO: set based on the outcome once we're actually doing stuff
+        safelySetKnownTaskStatus(TaskStatus.COMPLETE);
 
         return output;
     }
@@ -104,6 +104,11 @@ public class SqlTask implements Task
         return "(build script output for " + relName + ")";
     }
 
+    private synchronized void safelySetKnownTaskStatus(TaskStatus taskStatus)
+    {
+        knownTaskStatus = Optional.of(taskStatus);
+    }
+
 
     @Override
     public RelName getRelName()
@@ -122,7 +127,7 @@ public class SqlTask implements Task
     {
         if( knownTaskStatus.isEmpty() )
         {
-            knownTaskStatus = Optional.of(TaskStatus.UPSTREAM_FAILED);
+            safelySetKnownTaskStatus(TaskStatus.UPSTREAM_FAILED);
         }
     }
 }
