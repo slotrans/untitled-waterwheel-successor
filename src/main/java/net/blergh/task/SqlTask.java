@@ -7,6 +7,7 @@ import org.jdbi.v3.core.Jdbi;
 import org.slf4j.Logger;
 
 import java.util.Optional;
+import java.util.Random;
 import java.util.concurrent.FutureTask;
 
 public class SqlTask implements Task
@@ -19,6 +20,7 @@ public class SqlTask implements Task
     private final BuildMode buildMode;
 
     private final Jdbi jdbi;
+    //TODO: probably needs a timeout, though you may prefer to lean on the DB for that
 
     //INVARIANT: knownTaskStatus must be kept in-sync with respect to the FutureTask and Thread
     private Optional<TaskStatus> knownTaskStatus;
@@ -69,7 +71,18 @@ public class SqlTask implements Task
 
         output += runBuild();
 
+        //TODO: this is just for testing! remove it later!
+        try
+        {
+            Thread.sleep(new Random().nextInt(1000, 8000));
+        }
+        catch (InterruptedException e)
+        {
+            //don't care
+        }
+
         //TODO: set based on the outcome once we're actually doing stuff
+        log.info("{}: runTransformation() completed", relName);
         safelySetKnownTaskStatus(TaskStatus.COMPLETE);
 
         return output;
@@ -129,5 +142,18 @@ public class SqlTask implements Task
         {
             safelySetKnownTaskStatus(TaskStatus.UPSTREAM_FAILED);
         }
+    }
+
+    @Override
+    public int getThreadWeight()
+    {
+        //TODO: make this configurable per-task
+        return 1;
+    }
+
+    @Override
+    public String toString()
+    {
+        return String.format("SqlTask(%s)", relName.toFullName());
     }
 }

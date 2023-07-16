@@ -43,4 +43,22 @@ public class SourceTask implements Task
     {
         throw new UnsupportedOperationException("a SourceTask having a failed dependency makes no sense!");
     }
+
+    @Override
+    public boolean start()
+    {
+        throw new UnsupportedOperationException("a SourceTask should never be started!");
+    }
+
+    @Override
+    public int getThreadWeight()
+    {
+        return 0;
+    }
+
+    @Override
+    public String toString()
+    {
+        return String.format("SourceTask(%s)", relName.toFullName());
+    }
 }

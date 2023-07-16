@@ -13,5 +13,9 @@ public interface Task //TODO: should this be sealed?
 
     void upstreamFailureObserved();
 
+    boolean start();
+
+    int getThreadWeight();
+
     //TODO: public Optional<String> getResult() or something
 }
