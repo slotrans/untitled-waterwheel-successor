@@ -146,7 +146,21 @@
         - create an empty list to hold the nodes that will flow to the next iteration
         - inner loop: iterate the list
             - compute state
-            - if it's a terminal state, journal it
+            - if it's a terminal state, journal it, and remove it from the list (or equivalently: *don't* add it to a new list to be used next iteration)
             - if it's READY, and there's a slot available, start it (not sure if nodes should implement Runnable or Callable, or just have an interface method that starts their machinery)
                 - currently thinking it's up to each node type to know how to run itself, but not 100% sure
             - still may want to add a delay here to reduce CPU usage
+
+
+## 2023-07-09
+- thinking of making wrapper classes to represent "name DAG" and "task DAG"
+    - typing/reading `DirectedAcyclicGraph<RelName, DefaultEdge>` over and over is getting old
+    - some elements of the jGraphT API kinda suck
+        - annoying that EdgeType has to be stated twice in `new DirectedAcyclicGraph<NodeType, EdgeType>(EdgeType.class)`
+        - why does Graphs.addAllVertices take 2 arguments and Graphs.addAllEdges take 3?
+        - iterating over edges is kinda useless by default, you need to call getSource() and getTarget() on the edge to make sense of it
+- how should Task results be modeled?
+    - basic requirements are that a task should
+        - know if it has a result or not
+        - given that it has a result, know whether it was a success or failure
+    - occurs to me that the original Waterwheel didn't grapple with this problem since Luigi would catch any exception, was responsible for task state, etc.
