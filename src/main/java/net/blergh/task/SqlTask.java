@@ -104,26 +104,6 @@ public class SqlTask implements Task
         return "(build script output for " + relName + ")";
     }
 
-    @Override
-    public boolean isRunning()
-    {
-        /*
-        if( futureTask == null )
-        {
-            return false;
-        }
-
-        if( futureTask.isDone() || futureTask.isCancelled() )
-        {
-            return false;
-        }
-
-        return true;
-        */
-        return knownTaskStatus.isPresent() && knownTaskStatus.get() == TaskStatus.RUNNING;
-    }
-
-    //TODO: public Optional<String> getResult() or something
 
     @Override
     public RelName getRelName()

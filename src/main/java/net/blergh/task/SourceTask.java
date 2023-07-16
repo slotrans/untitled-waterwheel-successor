@@ -33,12 +33,6 @@ public class SourceTask implements Task
     }
 
     @Override
-    public boolean isRunning()
-    {
-        return false;
-    }
-
-    @Override
     public Optional<TaskStatus> getKnownTaskStatus()
     {
         return Optional.of(TaskStatus.COMPLETE);

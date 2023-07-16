@@ -9,9 +9,9 @@ public interface Task //TODO: should this be sealed?
 {
     RelName getRelName();
 
-    boolean isRunning();
-
     Optional<TaskStatus> getKnownTaskStatus();
 
     void upstreamFailureObserved();
+
+    //TODO: public Optional<String> getResult() or something
 }
