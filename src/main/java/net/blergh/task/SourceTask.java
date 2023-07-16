@@ -43,4 +43,10 @@ public class SourceTask implements Task
     {
         return Optional.of(TaskStatus.COMPLETE);
     }
+
+    @Override
+    public void upstreamFailureObserved()
+    {
+        throw new UnsupportedOperationException("a SourceTask having a failed dependency makes no sense!");
+    }
 }

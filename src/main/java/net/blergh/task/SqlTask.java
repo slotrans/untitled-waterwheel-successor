@@ -136,4 +136,13 @@ public class SqlTask implements Task
     {
         return knownTaskStatus;
     }
+
+    @Override
+    public void upstreamFailureObserved()
+    {
+        if( knownTaskStatus.isEmpty() )
+        {
+            knownTaskStatus = Optional.of(TaskStatus.UPSTREAM_FAILED);
+        }
+    }
 }

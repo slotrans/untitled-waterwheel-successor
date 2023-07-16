@@ -12,4 +12,6 @@ public interface Task //TODO: should this be sealed?
     boolean isRunning();
 
     Optional<TaskStatus> getKnownTaskStatus();
+
+    void upstreamFailureObserved();
 }

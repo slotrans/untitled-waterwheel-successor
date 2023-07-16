@@ -106,6 +106,7 @@ public class App
             {
                 case FAILED:
                 case UPSTREAM_FAILED:
+                    taskInQuestion.upstreamFailureObserved();
                     return TaskStatus.UPSTREAM_FAILED;
                 case WAITING:
                 case READY:
