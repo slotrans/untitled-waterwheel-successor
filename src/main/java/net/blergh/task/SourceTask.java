@@ -2,7 +2,10 @@ package net.blergh.task;
 
 import net.blergh.LoggerFactory;
 import net.blergh.RelName;
+import net.blergh.TaskStatus;
 import org.slf4j.Logger;
+
+import java.util.Optional;
 
 /* TODO
     In theory there could be a number of kinds of source tasks:
@@ -15,7 +18,7 @@ public class SourceTask implements Task
 {
     private static final Logger log = LoggerFactory.make();
 
-    private RelName relName;
+    private final RelName relName;
 
 
     public SourceTask(RelName relName)
@@ -33,5 +36,11 @@ public class SourceTask implements Task
     public boolean isRunning()
     {
         return false;
+    }
+
+    @Override
+    public Optional<TaskStatus> getKnownTaskStatus()
+    {
+        return Optional.of(TaskStatus.COMPLETE);
     }
 }

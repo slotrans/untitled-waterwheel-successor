@@ -24,13 +24,8 @@ public class App
 {
     private static final Logger log = LoggerFactory.make();
 
+    //TODO: take this as a parameter?
     private static final String SRC = "src";
-    private static final String SOURCE_RELATIONS_DOT_GV = SRC+"/source_relations.gv";
-    private static final String CREATE_DOT_SQL = "create.sql";
-    private static final String BUILD_DOT_SQL = "build.sql";
-    private static final String DEPS_DOT_GV = "deps.gv";
-    private static final String CONFIG_DOT_PROPERTIES = "build.properties";
-    private static final String BUILD_MODE_PROP = "buildMode";
 
     public static void main( String[] args ) throws Exception
     {
@@ -43,11 +38,17 @@ public class App
                 .type(String.class)
                 .required(false)
                 .help("target selection expression (NOT YET IMPLEMENTED)");
+        parser.addArgument("-t", "--threads")
+                .type(Integer.class)
+                .required(false)
+                .setDefault(1)
+                .help("number of worker threads");
 
         try
         {
             Namespace parsedArgs = parser.parseArgs(args);
-            realMain();
+            int threads = parsedArgs.get("threads");
+            realMain(threads);
         }
         catch (ArgumentParserException e)
         {
@@ -55,134 +56,72 @@ public class App
         }
     }
 
-    private static void realMain() throws IOException //TODO: figure out where IOException should be handled
+    private static void realMain(final int maxThreads) throws IOException //TODO: figure out where IOException should be handled
     {
-        //we'll use this DAG to accumulate dependencies as we load each task
-        final DirectedAcyclicGraph<RelName, DefaultEdge> nameDAG = new DirectedAcyclicGraph<>(DefaultEdge.class);
+        ScriptTree scriptTree = new ScriptTree(SRC, null); //TODO: pass an actual Jdbi instance
+        final DirectedAcyclicGraph<Task, DefaultEdge> taskDAG = scriptTree.getTaskDAG();
+        final Map<RelName, Task> taskTable = scriptTree.getTaskTable();
 
-        //seed the dependency graph with declared sources
-        final DirectedAcyclicGraph<RelName, DefaultEdge> sourceRelations = importNameDAGFragment(Path.of(SOURCE_RELATIONS_DOT_GV));
-        Graphs.addAllVertices(nameDAG, sourceRelations.vertexSet());
-
-        //keep track of all tasks by their name
-        final Map<RelName, Task> taskTable = new HashMap<>();
-
-        nameDAG.forEach( nodeRelName -> {
-            log.info("constructing SourceTask for {}", nodeRelName.toFullName());
-            SourceTask sourceTask = new SourceTask(nodeRelName);
-            taskTable.put(nodeRelName, sourceTask);
-        });
-
-        //find all src/<schema>/<table>/ directories
-        log.debug("enumerating script directories...");
-        final List<Path> srcDirectoryPaths = Files.find(
-                    Path.of(SRC),
-                    3,
-                    (path, basicFileAttributes) -> basicFileAttributes.isDirectory(),
-                    FileVisitOption.FOLLOW_LINKS
-        ).toList();
-
-        //try to load a task from each directory
-        for( Path tableDirectoryPath : srcDirectoryPaths )
-        {
-            log.debug("entering directory {}", tableDirectoryPath);
-            if( tableDirectoryPath.getNameCount() != 3)
-            {
-                log.debug("ignoring directory {}", tableDirectoryPath);
-                continue;
-            }
-
-            boolean hasCreate = false;
-            boolean hasBuild = false;
-            boolean hasDeps = false;
-            String createScript = "";
-            String buildScript = "";
-            String depsFragment = "";
-            Properties config = new Properties();
-            config.put(BUILD_MODE_PROP, BuildMode.FULL.toString());
-
-            for(Path filePath : Files.list(tableDirectoryPath).toList() )
-            {
-                if( CREATE_DOT_SQL.equals(filePath.getFileName().toString()) )
-                {
-                    hasCreate = true;
-                    createScript = Files.readString(filePath);
-                }
-
-                if( BUILD_DOT_SQL.equals(filePath.getFileName().toString()) )
-                {
-                    hasBuild = true;
-                    buildScript = Files.readString(filePath);
-                }
-
-                if( DEPS_DOT_GV.equals(filePath.getFileName().toString()) )
-                {
-                    hasDeps = true;
-                    depsFragment = Files.readString(filePath);
-                }
-
-                if( CONFIG_DOT_PROPERTIES.equals(filePath.getFileName().toString()) )
-                {
-                    Properties fileProps = new Properties();
-                    fileProps.load(Files.newBufferedReader(filePath));
-                    config.putAll(fileProps);
-                }
-            }
-
-            final String schemaName = tableDirectoryPath.getName(1).toString();
-            final String tableName = tableDirectoryPath.getName(2).toString();
-            final RelName relName = new RelName(schemaName, tableName);
-
-            //TODO: check if each task has a sensible combination of files, and warn (error?) if not
-            //TODO: perhaps a useful CLI flag would be to fail-fast if a task appears to be invalid
-
-            log.info("constructing SqlTask for {}", relName.toFullName());
-            SqlTask sqlTask = new SqlTask(
-                    relName,
-                    createScript,
-                    buildScript,
-                    BuildMode.valueOf((String) config.get(BUILD_MODE_PROP)),
-                    null //TODO
-            );
-            taskTable.put(relName, sqlTask);
-        }
-
-        //now that we've loaded all the tasks, transform the DAG of names into a DAG of tasks
-        final DirectedAcyclicGraph<Task, DefaultEdge> taskDAG = new DirectedAcyclicGraph<>(DefaultEdge.class);
-        //might be able to eliminate this loop by using a VertexSupplier
-        for( RelName nodeRelName : nameDAG.vertexSet() )
-        {
-            taskDAG.addVertex(taskTable.get(nodeRelName));
-        }
-        for( DefaultEdge edge : nameDAG.edgeSet() )
-        {
-            Task source = taskTable.get(nameDAG.getEdgeSource(edge));
-            Task target = taskTable.get(nameDAG.getEdgeTarget(edge));
-            taskDAG.addEdge(source, target);
-        }
 
         //the driving loop will use a List of tasks in Topological Sort order (which DAG's forEach produces)
         List<Task> workingSet = new ArrayList<>();
         taskDAG.forEach(workingSet::add); //DAGs iterate in Topological Sort order
+        log.debug("initial workingSet:");
+        workingSet.forEach(item -> log.debug("  {}: {}", item.getClass().getName(), item.getRelName().toFullName()));
+        //TODO: export to a DOT file
 
-        //driving loop:
-//        while(!workingSet.isEmpty())
-//        {
-//
-//        }
+
+        //driving loop
+        int drivingLoopIterations = 0;
+        int runningThreads = 0;
+        while(!workingSet.isEmpty())
+        {
+            List<Task> nextWorkingSet = new ArrayList<>();
+            for( Task task : workingSet )
+            {
+                TaskStatus status = inferTaskStatus(task, taskDAG);
+
+            }
+
+            workingSet = nextWorkingSet;
+            drivingLoopIterations++;
+
+            break; //TESTING!
+        }
     }
 
-    private static DirectedAcyclicGraph<RelName, DefaultEdge> importNameDAGFragment(Path path) throws IOException
+    private static TaskStatus inferTaskStatus(Task taskInQuestion, DirectedAcyclicGraph<Task, DefaultEdge> graph)
     {
-        final DirectedAcyclicGraph<RelName, DefaultEdge> graph = new DirectedAcyclicGraph<>(DefaultEdge.class);
-        final DOTImporter<RelName, DefaultEdge> importer = new DOTImporter<>();
-        importer.setVertexFactory(RelName::fromString);
+        //recursive base case
+        final Optional<TaskStatus> knownTaskStatus = taskInQuestion.getKnownTaskStatus();
+        if( knownTaskStatus.isPresent() )
+        {
+            return knownTaskStatus.get();
+        }
 
-        final String fileContents = Files.readString(path);
-        final String wrapped = "digraph {\n" + fileContents + "\n}";
-
-        importer.importGraph(graph, new StringReader(wrapped));
-        return graph;
+        for( Task predecessorTask : Graphs.predecessorListOf(graph, taskInQuestion) )
+        {
+            TaskStatus predecessorStatus = inferTaskStatus(predecessorTask, graph);
+            switch(predecessorStatus)
+            {
+                case FAILED:
+                case UPSTREAM_FAILED:
+                    return TaskStatus.UPSTREAM_FAILED;
+                case WAITING:
+                case READY:
+                case RUNNING:
+                    return TaskStatus.WAITING;
+                case COMPLETE:
+                    break; //no-op
+            }
+        }
+        //if we didn't return already that means ALL predecessor tasks are COMPLETE
+        return TaskStatus.READY;
     }
 
+    private static void journalTaskState(Task task, TaskStatus status)
+    {
+        //TODO: real journaling
+        System.out.println("JOURNAL: \"" + task.getRelName().toFullName() + "\" -> " + status);
+    }
 }

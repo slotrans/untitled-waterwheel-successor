@@ -2,7 +2,6 @@ package net.blergh;
 
 public enum TaskStatus
 {
-    INITIAL(false),
     WAITING(false),
     READY(false),
     RUNNING(false),
