@@ -98,8 +98,10 @@ public class ScriptTree
             String createScript = "";
             String buildScript = "";
             String depsFragment = "";
+
             Properties config = new Properties();
-            config.put(BUILD_MODE_PROP, BuildMode.FULL.toString());
+            config.put(BUILD_MODE_PROP, BuildMode.FULL.toString()); //default build mode is FULL
+
             DirectedAcyclicGraph<RelName, DefaultEdge> oneTaskDAG;
 
             for(Path filePath : Files.list(tableDirectoryPath).toList() )
@@ -143,12 +145,13 @@ public class ScriptTree
                     createScript,
                     buildScript,
                     BuildMode.valueOf((String) config.get(BUILD_MODE_PROP)),
-                    null //TODO
+                    jdbi
             );
             taskTable.put(relName, sqlTask);
             if( depsFragment != null && !depsFragment.isEmpty() )
             {
                 oneTaskDAG = buildNameDAGFragment(depsFragment);
+                //TODO: one of these NPEs if a task depends on a non-existent source
                 Graphs.addAllVertices(nameDAG, oneTaskDAG.vertexSet());
                 Graphs.addAllEdges(nameDAG, oneTaskDAG, oneTaskDAG.edgeSet());
             }

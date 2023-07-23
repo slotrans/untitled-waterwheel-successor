@@ -5,6 +5,7 @@ import net.sourceforge.argparse4j.ArgumentParsers;
 import net.sourceforge.argparse4j.inf.ArgumentParser;
 import net.sourceforge.argparse4j.inf.ArgumentParserException;
 import net.sourceforge.argparse4j.inf.Namespace;
+import org.jdbi.v3.core.Jdbi;
 import org.jgrapht.Graphs;
 import org.jgrapht.graph.*;
 import org.slf4j.Logger;
@@ -22,6 +23,11 @@ public class App
     public static void main( String[] args ) throws Exception
     {
         ArgumentParser parser = ArgumentParsers.newFor("untitled-waterwheel-successor").build().description("BUILD SOME TABLES WOOOOO");
+        //TODO: read these from env vars and/or a config file
+        parser.addArgument("--jdbc-url")
+                .type(String.class)
+                .required(true)
+                .help("JDBC URL to connect to");
         parser.addArgument("-j", "--journal")
                 .type(String.class)
                 .required(false)
@@ -45,14 +51,15 @@ public class App
         {
             Namespace parsedArgs = parser.parseArgs(args);
             log.debug("parsedArgs={}", parsedArgs);
-            int threads = parsedArgs.get("threads");
-            int schedulerTargetMillis = parsedArgs.get("scheduler_target_millis");
+            final String jdbcUrl = parsedArgs.get("jdbc_url");
+            final int threads = parsedArgs.get("threads");
+            final int schedulerTargetMillis = parsedArgs.get("scheduler_target_millis");
 
             log.info("running with:");
             log.info("threads={}", threads);
             log.info("scheduler target millis={}", schedulerTargetMillis);
 
-            realMain(threads, schedulerTargetMillis);
+            realMain(jdbcUrl, threads, schedulerTargetMillis);
         }
         catch (ArgumentParserException e)
         {
@@ -60,9 +67,21 @@ public class App
         }
     }
 
-    private static void realMain(final int maxThreads, final int schedulerTargetMillis) throws IOException //TODO: figure out where IOException should be handled
+    private static void realMain(
+            final String jdbcUrl,
+            final int maxThreads,
+            final int schedulerTargetMillis
+    ) throws IOException //TODO: figure out where IOException should be handled
     {
-        ScriptTree scriptTree = new ScriptTree(SRC, null); //TODO: pass an actual Jdbi instance
+        final Jdbi jdbi = Jdbi.create(jdbcUrl); //TODO: .setSqlLogger() with a custom SqlLogger impl
+        log.info("testing DB connection...");
+        jdbi.useHandle( handle -> {
+            //this should ideally be configurable in case "select 1" isn't a valid statement on some platform
+            handle.execute("select 1");
+        });
+
+        log.info("building ScriptTree...");
+        final ScriptTree scriptTree = new ScriptTree(SRC, jdbi); //TODO: pass an actual Jdbi instance
         final DirectedAcyclicGraph<Task, DefaultEdge> taskDAG = scriptTree.getTaskDAG();
         final Map<RelName, Task> taskTable = scriptTree.getTaskTable();
 
@@ -78,7 +97,7 @@ public class App
         //driving loop
         int drivingLoopIterations = 0;
         int runningThreads = 0;
-        while(!workingSet.isEmpty())
+        while( !workingSet.isEmpty() )
         {
             log.debug("driver iteration {}, workingSet: {}", drivingLoopIterations, workingSet);
             long loopStartNanos = System.nanoTime();
@@ -87,6 +106,11 @@ public class App
             for( Task task : workingSet )
             {
                 TaskStatus status = inferTaskStatus(task, taskDAG);
+
+                if( status == TaskStatus.RUNNING )
+                {
+                    log.info("task {} is RUNNING", task);
+                }
 
                 if( status == TaskStatus.READY && maxThreads-runningThreads >= task.getThreadWeight() )
                 {
@@ -136,12 +160,12 @@ public class App
             TaskStatus predecessorStatus = inferTaskStatus(predecessorTask, graph);
             switch(predecessorStatus)
             {
-                case FAILED:
+                case FAILED: //fall-through
                 case UPSTREAM_FAILED:
                     taskInQuestion.upstreamFailureObserved();
                     return TaskStatus.UPSTREAM_FAILED;
-                case WAITING:
-                case READY:
+                case WAITING: //fall-through
+                case READY: //fall-through
                 case RUNNING:
                     return TaskStatus.WAITING;
                 case COMPLETE:
@@ -171,6 +195,7 @@ public class App
             catch (InterruptedException e)
             {
                 //ok!
+                log.info("thread interrupted during delayToTarget()");
             }
         }
     }

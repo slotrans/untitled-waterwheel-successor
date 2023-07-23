@@ -3,7 +3,9 @@ package net.blergh.task;
 import net.blergh.LoggerFactory;
 import net.blergh.RelName;
 import net.blergh.TaskStatus;
+import org.apache.commons.math3.util.Precision;
 import org.jdbi.v3.core.Jdbi;
+import org.jdbi.v3.core.JdbiException;
 import org.slf4j.Logger;
 
 import java.util.Optional;
@@ -23,7 +25,7 @@ public class SqlTask implements Task
     //TODO: probably needs a timeout, though you may prefer to lean on the DB for that
 
     //INVARIANT: knownTaskStatus must be kept in-sync with respect to the FutureTask and Thread
-    private Optional<TaskStatus> knownTaskStatus;
+    private volatile Optional<TaskStatus> knownTaskStatus;
     private FutureTask<String> futureTask; //TODO: should return a record describing its execution, not just the output but also the runtime, etc
     private Thread threadForFuture;
 
@@ -62,59 +64,63 @@ public class SqlTask implements Task
 
     private String runTransformation()
     {
-        String output = "";
-
-        if( buildMode == BuildMode.FULL )
-        {
-            output += runCreate();
-        }
-
-        output += runBuild();
-
-        //TODO: this is just for testing! remove it later!
         try
         {
-            Thread.sleep(new Random().nextInt(1000, 8000));
+            if( buildMode == BuildMode.FULL )
+            {
+                log.info("running create for {}", relName);
+                runCreate();
+            }
+
+            runBuild();
+
+            log.info("{}: runTransformation() completed", relName);
+            safelySetKnownTaskStatus(TaskStatus.COMPLETE);
         }
-        catch (InterruptedException e)
+        catch( JdbiException e )
         {
-            //don't care
+            log.error("{}: JdbiException caught", relName, e);
+            safelySetKnownTaskStatus(TaskStatus.FAILED);
         }
 
-        //TODO: set based on the outcome once we're actually doing stuff
-        log.info("{}: runTransformation() completed", relName);
-        safelySetKnownTaskStatus(TaskStatus.COMPLETE);
-
-        return output;
+        return knownTaskStatus.toString(); //need to return something to satisfy Callable, probably need to re-think this
     }
 
-    private String runCreate()
+    private void runCreate()
     {
-        /* something like...
-        jdbi.withHandle(handle -> {
-            StringBuilder output = new StringBuilder();
-
+        jdbi.useHandle( handle -> {
             String dropStatement = String.format("drop table if exists \"%s\".\"%s\"", relName.schemaName(), relName.tableName());
             log.info(dropStatement);
-            output.append(dropStatement);
+            handle.execute(dropStatement);
 
+            //TODO: run this in a transaction
             log.info(createScript);
-            output.append(createScript);
-            handle.createScript(createScript).execute();
+            handle.createScript(createScript).execute(); //unfortunate naming coincidence here...
 
-            String grantStatement = String.format("grant select on \"%s\".\"%s\" to common_read_role", relName.schemaName(), relName.tableName());
-            log.info(grantStatement);
-            output.append(grantStatement);
-
-            return output.toString();
+            //String grantStatement = String.format("grant select on \"%s\".\"%s\" to common_read_role", relName.schemaName(), relName.tableName());
+            //log.info(grantStatement);
         });
-        */
-        return "(table creation output for " + relName + ")";
     }
 
-    private String runBuild()
+    private void runBuild()
     {
-        return "(build script output for " + relName + ")";
+        //TODO: create a configurable _waterwheel_global temp table here, or some general pre-script
+
+        //TODO: also a general post-script
+
+        jdbi.useHandle( handle -> {
+            log.info(buildScript);
+            final long buildStartNanos = System.nanoTime();
+            handle.createScript(buildScript).execute();
+            final long buildStopNanos = System.nanoTime();
+            final double ONE_BILLION = 1_000_000_000;
+            final double durationSeconds = Precision.round( (buildStopNanos - buildStartNanos) / ONE_BILLION, 3);
+            log.info("{}: build complete in {} seconds", relName, durationSeconds);
+
+            String analyzeStatement = String.format("analyze \"%s\".\"%s\"", relName.schemaName(), relName.tableName());
+            log.info(analyzeStatement);
+            handle.execute(analyzeStatement);
+        });
     }
 
     private synchronized void safelySetKnownTaskStatus(TaskStatus taskStatus)
