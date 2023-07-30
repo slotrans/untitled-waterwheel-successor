@@ -146,7 +146,7 @@ public class App
         }
     }
 
-    private static TaskStatus inferTaskStatus(Task taskInQuestion, DirectedAcyclicGraph<Task, DefaultEdge> graph)
+    static TaskStatus inferTaskStatus(Task taskInQuestion, DirectedAcyclicGraph<Task, DefaultEdge> graph)
     {
         //recursive base case
         final Optional<TaskStatus> knownTaskStatus = taskInQuestion.getKnownTaskStatus();
@@ -172,7 +172,9 @@ public class App
                     break; //no-op
             }
         }
-        //if we didn't return already that means ALL predecessor tasks are COMPLETE
+        //if we didn't return already that means two things are true:
+        // - THIS task is NOT in RUNNING or any terminal status
+        // - ALL predecessor tasks are COMPLETE (or none exist)
         return TaskStatus.READY;
     }
 
