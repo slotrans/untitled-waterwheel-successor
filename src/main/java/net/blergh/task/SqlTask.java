@@ -9,7 +9,6 @@ import org.jdbi.v3.core.JdbiException;
 import org.slf4j.Logger;
 
 import java.util.Optional;
-import java.util.Random;
 import java.util.concurrent.FutureTask;
 
 public class SqlTask implements Task
