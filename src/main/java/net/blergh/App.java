@@ -81,7 +81,7 @@ public class App
         });
 
         log.info("building ScriptTree...");
-        final ScriptTree scriptTree = new ScriptTree(SRC, jdbi); //TODO: pass an actual Jdbi instance
+        final ScriptTree scriptTree = new ScriptTree(SRC, jdbi);
         final DirectedAcyclicGraph<Task, DefaultEdge> taskDAG = scriptTree.getTaskDAG();
         final Map<RelName, Task> taskTable = scriptTree.getTaskTable();
 
