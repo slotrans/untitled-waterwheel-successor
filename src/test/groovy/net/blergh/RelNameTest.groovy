@@ -2,7 +2,8 @@ package net.blergh
 
 import spock.lang.Specification
 
-class RelNameTest extends Specification{
+class RelNameTest extends Specification
+{
     def "new-ing a RelName with ordinary names works"() {
         when:
         def myName = new RelName("some_schema", "some_table")
