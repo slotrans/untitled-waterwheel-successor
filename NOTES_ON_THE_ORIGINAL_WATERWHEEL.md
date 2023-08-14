@@ -46,56 +46,56 @@ For example, let's say you had the simple task graph A->B->C->D, and ran the who
 
 
 ## Things DBT has that Waterwheel didn't
-- docs
+- **docs:**
 Waterwheel's approach to docs was "if you write a README.md in your table directory, Bitbucket will render it" (yes we used Bitbucket not Github). For our purposes that was fine. DBT obviously goes much further, with structured table- and field-level docs, that it renders as an interactive site, including an interactive graph that supports selector syntax.
 
-- tests
+- **tests:**:
 Tests are something I struggled with, conceptually, for a long time while working on Waterwheel. For a true **test**, you would want to run a build in some kind of alternate or temporary environment where you can feed it known data for all of its input tables so that you can validate its output. For various reasons owing to the nature of SQL and databases, this is hard. I eventually punted entirely, vowing to return to the problem in the future, which sadly never happened.
 
 DBT's approach is not really _testing_ but rather _validation_. That is, it doesn't feed your code known inputs to be validated against expected outputs, rather it runs your code against whatever input is available then check broad assertions about the results. In this way it is quite similar to Great Expectations, so it's not all that clear that "having 'testing' built-in" is a major value-add.
 
 See ON_UNIT_TESTING_SQL.md for more.
 
-- explicit sources
+- **explicit sources:**
 I chose to assume that any declared dependency for which there was no build script _must_ be a source. This worked out fine, but I think my view has shifted since then towards "explicit sources are good".
 
-- an explicit "project"
+- **an explicit "project":**
 DBT's `dbt_project.yml` holds certain top-level configuration values that Waterwheel never needed. This is mainly because DBT attempts to be much more general and configurable, so that it can be adapted to local needs.
 
-- profiles
+- **profiles:**
 As with the concept of a "project", profiles are an approach to configuration that Waterwheel simply didn't need. Because it was fully built into its environment, the nature of "production" and "development" environments were assumed and built in, rather than being configurable.
 
-- per-developer namespacing
+- **per-developer namespacing:**
 Related to "profiles", DBT favors an approach where each developer gets their own namespace. For example if your production output schema is "analytics", Alice's developer profile might place her outputs in "analytics_alice". This is surely intended to avoid conflicts and concurrency issues, or more broadly to maintain the illusion that developers have a "local" environment. My approach with Waterwheel went the other way, embracing a shared development environment, because shared data is simply the reality of what we're doing. If Alice and Bob are working on the same table, it's _better_ that they bump into each other while working rather than later when they try to commit/merge. Sharing data in development also meant that devs never had to build from scratch, because we ran an automated dev build each morning, the output of which was available for everyone's use. Bootstrapping one's DBT namespace is a constant problem.
 
 I see this as an area where reasonable people can disagree. There are _tradeoffs_ in electing shared vs personal development data, and those tradeoffs vary with many attributes of your environment and team (team _size_ being only the most obvious). And ideal tool would support both strategies and document suggested workflows for each.
 
-- templating & macros
+- **templating & macros:**
 These are extremely bad.
 See ON_TEMPLATING_SQL.md for much more.
 
-- seeds
+- **seeds:**
 In general I prefer to keep data in a database, rather than in source control. Because of that, the idea of seeds would likely never have occurred to me. I can see why you might want to, even though I disagree. That said, DBT's implementation of seeds sucks. CSV only? Terrible.
 
-- packages
+- **packages:**
 Packages as a way of distributing modular collections of macros (ugh) or tests is a reasonable idea, and in practice _everyone_ uses `dbt-utils`. But packages as a way of distributing collections of _models_ is insane. It may seem like "models for Salesforce data" or "models for Zendesk data" would be portable, but they are not. **All** data transformation logic is idiosyncratic to a particular organization. In any event, as with projects and profiles, this was an idea Waterwheel simply didn't need.
 
-- "ephemeral" models
+- **"ephemeral" models:**
 I still have no idea what problem ephemeral models are meant to solve. Best as I can tell, they should never be used.
 
-- many supported platforms
+- **many supported platforms:**
 Waterwheel was built exclusively for Redshift since that's what we used. A few details of how Redshift works, and of how psycopg2/libpq works, leaked into its implementation. DBT of course strives to support a variety of popular data warehouse platforms.
 
 
 ## Things Waterwheel had that DBT doesn't
-- state
+- **state:**
 This is a big one. One of the two main **purposes** for using a DAG framework is to avoid repeating work that has already been done (or, looked at from a different perspective, to recover from partial failure by picking up where you left off). DBT does not support this at all (certainly not when it was new, and best as I can tell still does not), whereas Waterwheel supported this as a first-class feature (see the discussion of `--build-id`).
 
 It is vital, in my view, that in a scenario where you execute a build of 100 tables, which results in 99 successes and 1 failure, that you have the power to fix the failure, re-run the build, and see it skip the 99 things it's already done. If you don't see why that's essential, we live on different planets. Building a data warehouse invariably _takes significant wall-clock time_, often measured in hours. When you experience failures, which are more often due to external factors than they are to "a DW dev made a mistake", Waterwheel is there to help you, where DBT is not. The DBT developers either don't see this as a problem (again: different planets), or believe that it's up to developers/operators to use selectors to trim the build when recovering.
 
 DBT has introduced a concept of state -- see https://docs.getdbt.com/reference/node-selection/methods#the-state-method -- but it seems not to do what I'm describing here. It seems to be more concerned with the evolution of _project_ state.
 
-- multi-statement builds
+- **multi-statement builds:**
 DBT mostly requires a model to be specified as a single SQL statement, which must be a query as it is then wrapped in a CTAS. This has the advantage of enforcing that a model script builds the model it says it does and nothing else. Beyond that though, it is extremely limiting. What if you want to create a temp table? What if your model covers 3 cases that are best expressed separately? What if you need to do an `update`? Or call a procedure? The DBT authors seem to believe that "more models" or "do a union" are always acceptable answers. Waterwheel treats you like an adult.
 
 It's telling that DBT actually provides an escape hatch here, at least with BigQuery, that lets you write a multi-statement script.
@@ -104,7 +104,7 @@ To be clear, single-statement scripts are worth preferring, and having that as a
 
 
 ## Areas where Waterwheel and DBT made different choices
-- how tables are created
+- **how tables are created:**
 This is arguably my biggest disagreement with DBT's design, and the one I estimate as least likely to ever be resolved to my satsifaction.
 
 The proper first step in designing a table is to write a `create table` statement. Not because you "have to", but because it forces you to **design** what you are building before you set about building it. You must choose a name, a primary key, field names and types and nullity. If your platform has other concepts such as storage engine, data distribution, sorting, compression, and so on, this is also when you must consider those factors.
@@ -113,33 +113,33 @@ DBT not only doesn't force you to do this, it **deprives** you of the opportunit
 
 It _might_ be possible to solve this deficiency of DBT using a "custom materialization", but frankly that may not be worth it, because it would put you so far outside the normal use of the tool.
 
-- how dependencies are declared/inferred
+- **how dependencies are declared/inferred:**
 DBT takes the approach of inferring dependencies through the `source()` and `ref()` macros, whereas Waterwheel asks you to explicitly list your dependencies in a `deps.gv` file.
 
 Originally, the goal for Waterwheel was to _parse_ your build SQL to identify dependencies. Parsing SQL, as a general matter, turns out to be quite difficult, at least it was in 2017-19 (`sqlglot` really seems to have advanced what's reasonably tractable here). Certainly not impossible, especially if you're willing to commit to Postgres-only, but difficult enough that I ultimately gave up on it in favor of "just write them down separately, honor system!". The disadvantages are obviously one that you have to do extra work, two that you can forget, and three that you can make mistakes. Perhaps surprisingly, these turned out to be total non-problems in practice. Plus, it turned out to be an _advantage_ that you could deliberatley omit a dependency from your declarations.
 
 It's worth noting that DBT's approach actually has a large element of "honor system" as well. You can always choose (or forget) to write your model SQL against fixed table names rather than using `source()` or `ref()`. I actually found this to be a significant source of problems when introducing DBT to a team that hasn't used it before, in that developers would forget to use the macros and so the inferred dependency graph would be incorrect. Referencing straight table names is allowed and doesn't raise an error so enforcement can be difficult! Separating dependencies into another file makes catching this mistake in code review easier. Also note that DBT supports a dependency "hint" (using comments) for indicating dependencies that _don't_ show up via `source()`/`ref()`. On net I don't think there's much difference in terms of error-prone-ness. The major disadvantage that DBT's approach has is, of course, that your model SQL _cannot_ be executed as-written, it must be "compiled" first.
 
-- config
+- **config:**
 Waterwheel has extremely minimal config, only an indication of whether a particular table is a "FULL" (the default) or "INCREMENTAL" build. This is held in an optional `config.json` file within each table directory. This was bolted on in a bit of a hurry when support for "INCREMENTAL" was added. Neither "INCREMENTAL" builds nor any notion of config were part of the original design.
 
 Contrast with DBT's approach which both permits and requires much more complex model-level configuration. Config can be set at a project level, set or overridden at a model level in YAML config, and finally set or overridden in the model file itself within a templating block. There are many more values that can/must be set in config, like Redshift DISTSTYLE/DISTKEY/SORTKEY, or BigQuery partitioning, as a result of DBT not having "create table" statements.
 
 To the best of my knowledge DBT doesn't help you maintain project-level consistency in how config is expressed. To use it well you should standardize on storing config in YAML or inline, and enforce that through code review or linter rules (though you'll have to build such a linter yourself!). It would be better if you could, at a project level, _require_ config to be expressed one way or the other.
 
-- selector features
+- **selector features:**
 Waterwheel's selector support was limited to "one table", "all tables", "table X and all downstream", and "table X and all upstream".
 
 DBT offers much richer selector support, clearly(?) inspired by Drake. Honestly this is quite nice, I have no objections. I intend to copy much of this functionality, in particular: "arbitary list of tables", "--exclude", and tag-based selection.
 
-- "incremental"
+- **"incremental":**
 Waterwheel and DBT both support a notion of "incremental" builds.
 
 Waterwheel's is very bare-bones. All it does is _disable_ the code that drops and creates tables. It's up to the user to ensure the table is present, and consistent with the checked-in `create.sql`. No special provision is made for `build.sql` to run in "incremental mode" or anything like that, it is simply assumed that the author will write it to behave appropriately. There is no support for anything like DBT's "full refresh", again this is up to the user.
 
 DBT's "incremental" support is notable mainly for the way it expects you to _split_ your model logic, using templating, into "full refresh" and "incremental" paths. This is mostly fine but note the implicit assumption: that invoking DBT with `--full-refresh` might happen at any time and your model is expected to work in that circumstance. For small data warehouses this is fine, but in cases where the difference between "data since the last run" and "all data ever" is 1000x or 10000x, it can be Very Not Fine.
 
-- naming / project directory layout
+- **naming / project directory layout:**
 This is another area where Waterwheel and DBT differ markedly in such a way that I feel strongly that DBT is Wrong.
 
 Waterwheel enforces a particular directory layout: `<project_root>/src/<schema>/<table>/<files>`. There is a strict 1-to-1 correspondence between database naming and file location. There is never any question what name a given table will be created under. There is never any question where the build scripts for a particular table can be found. This pattern is inspired by Java, which _requires_ the class `Foo` in the package `com.example` to be defined in a file named `com/example/Foo.java`.
